@@ -1,1 +1,1 @@
-print("something completely different"s time)
+print("something completely different this time")
