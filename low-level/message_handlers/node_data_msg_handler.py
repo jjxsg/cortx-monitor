@@ -55,6 +55,7 @@ class NodeDataMsgHandler(ScheduledModuleThread, InternalMsgQ):
     # Section and keys in configuration file
     NODEDATAMSGHANDLER = MODULE_NAME.upper()
     TRANSMIT_INTERVAL = 'transmit_interval'
+    TRANSMIT_DURATION_THRESHOLD = 'transmit_duration_threshold'
     UNITS = 'units'
     DISK_USAGE_THRESHOLD = 'disk_usage_threshold'
     DEFAULT_DISK_USAGE_THRESHOLD = 80
@@ -79,6 +80,11 @@ class NodeDataMsgHandler(ScheduledModuleThread, InternalMsgQ):
         'cpu' : False,
         'disk' : False,
         'memory' : False
+    }
+    check_time = {
+        'cpu' : -1,
+        'memory' : -1,
+        'disk' : -1
     }
     prev_nw_status = {}
     prev_cable_cnxns = {}
@@ -125,6 +131,8 @@ class NodeDataMsgHandler(ScheduledModuleThread, InternalMsgQ):
         super(NodeDataMsgHandler, self).initialize_msgQ(msgQlist)
 
         self._transmit_interval = int(Conf.get(SSPL_CONF, f"{self.NODEDATAMSGHANDLER}>{self.TRANSMIT_INTERVAL}",
+                                                60))
+        self._transmit_duration_threshold = int(Conf.get(SSPL_CONF, f"{self.NODEDATAMSGHANDLER}>{self.TRANSMIT_DURATION_THRESHOLD}",
                                                 60))
         self._units = Conf.get(SSPL_CONF, f"{self.NODEDATAMSGHANDLER}>{self.UNITS}",
                                                 "MB")
@@ -221,8 +229,24 @@ class NodeDataMsgHandler(ScheduledModuleThread, InternalMsgQ):
         else:
             self.persistent_data[resource] = {
                 f'high_{resource}_usage' : str(self.high_usage[resource]),
+                f'{resource}_check_time' : str(self.check_time[resource])
             }
         store.put(self.persistent_data[resource], PER_DATA_PATH)
+
+    def read_persistent_data(self, data_path):
+        """Read resource data from persistent cache"""
+        PER_DATA_PATH = os.path.join(self.cache_dir_path,
+                            f'{data_path}_{self.node_id}')
+        
+        if os.path.isfile(PER_DATA_PATH):
+            persistent_data = store.get(PER_DATA_PATH)
+            return persistent_data
+        
+        return False
+
+    def get_current_time(self):
+        """Returns the time as integer number in seconds since the epoch in UTC."""
+        return int(time.time())
 
     def _import_products(self, product):
         """Import classes based on which product is being used"""
@@ -412,75 +436,87 @@ class NodeDataMsgHandler(ScheduledModuleThread, InternalMsgQ):
             logger.warning("Host Memory Alert, Invalid host_memory_usage_threshold value are entered in config.")
             # Assigning default value to _disk_usage_threshold
             self._host_memory_usage_threshold = self.DEFAULT_HOST_MEMORY_USAGE_THRESHOLD
+        
+        current_time = self.get_current_time()
+        memory_persistent_data = self.read_persistent_data('MEMORY_USAGE_DATA')
+        if memory_persistent_data:
+            previous_check_time = memory_persistent_data['memory_check_time']
+        else:
+            previous_check_time = -1
 
         if self._node_sensor.total_memory["percent"] >= self._host_memory_usage_threshold \
            and not self.high_usage['memory']:
+            if previous_check_time == -1:
+                self.check_time['memory'] = current_time
+            
+            if self.check_time['memory'] - previous_check_time >= self._transmit_duration_threshold:
+                # Create the disk space data message and hand it over to the egress processor to transmit
+                self.high_usage['memory'] = True
+                # Create the disk space data message and hand it over to the egress processor to transmit
+                fault_event = "Host memory usage increased to %s, beyond configured threshold of %s" \
+                            %(self._node_sensor.total_memory["percent"],
+                                self._host_memory_usage_threshold)
 
-            # Create the disk space data message and hand it over to the egress processor to transmit
-            self.high_usage['memory'] = True
-            # Create the disk space data message and hand it over to the egress processor to transmit
-            fault_event = "Host memory usage increased to %s, beyond configured threshold of %s" \
-                          %(self._node_sensor.total_memory["percent"],
-                            self._host_memory_usage_threshold)
+                logger.warning(fault_event)
 
-            logger.warning(fault_event)
+                logged_in_users = []
+                # Create the host update message and hand it over to the egress processor to transmit
+                hostUpdateMsg = HostUpdateMsg(self._node_sensor.host_id,
+                                        self._epoch_time,
+                                        self._node_sensor.boot_time,
+                                        self._node_sensor.up_time,
+                                        self._node_sensor.uname, self._units,
+                                        self._node_sensor.total_memory,
+                                        self._node_sensor.logged_in_users,
+                                        self._node_sensor.process_count,
+                                        self._node_sensor.running_process_count,
+                                        self.FAULT,
+                                        fault_event
+                                        )
+                # Add in uuid if it was present in the json request
+                if self._uuid is not None:
+                    hostUpdateMsg.set_uuid(self._uuid)
+                jsonMsg = hostUpdateMsg.getJson()
+                # Transmit it to message processor
+                self.host_sensor_data = jsonMsg
+                self.os_sensor_type["memory_usage"] = self.host_sensor_data
+                self._write_internal_msgQ(EgressProcessor.name(), jsonMsg)
+                self.persist_state_data('memory', 'MEMORY_USAGE_DATA')
 
-            logged_in_users = []
-            # Create the host update message and hand it over to the egress processor to transmit
-            hostUpdateMsg = HostUpdateMsg(self._node_sensor.host_id,
-                                    self._epoch_time,
-                                    self._node_sensor.boot_time,
-                                    self._node_sensor.up_time,
-                                    self._node_sensor.uname, self._units,
-                                    self._node_sensor.total_memory,
-                                    self._node_sensor.logged_in_users,
-                                    self._node_sensor.process_count,
-                                    self._node_sensor.running_process_count,
-                                    self.FAULT,
-                                    fault_event
-                                    )
-            # Add in uuid if it was present in the json request
-            if self._uuid is not None:
-                hostUpdateMsg.set_uuid(self._uuid)
-            jsonMsg = hostUpdateMsg.getJson()
-            # Transmit it to message processor
-            self.host_sensor_data = jsonMsg
-            self.os_sensor_type["memory_usage"] = self.host_sensor_data
-            self._write_internal_msgQ(EgressProcessor.name(), jsonMsg)
-            self.persist_state_data('memory', 'MEMORY_USAGE_DATA')
+        if self._node_sensor.total_memory["percent"] < self._host_memory_usage_threshold:
+            if not self.high_usage['memory']:
+                self.check_time['memory'] = current_time
+            
+            else:
+                fault_resolved_event = "Host memory usage decreased to %s, lesser than configured threshold of %s" \
+                                        %(self._node_sensor.total_memory["percent"],
+                                        self._host_memory_usage_threshold)
+                logger.warning(fault_resolved_event)
+                logged_in_users = []
+                # Create the host update message and hand it over to the egress processor to transmit
+                hostUpdateMsg = HostUpdateMsg(self._node_sensor.host_id,
+                                        self._epoch_time,
+                                        self._node_sensor.boot_time,
+                                        self._node_sensor.up_time,
+                                        self._node_sensor.uname, self._units,
+                                        self._node_sensor.total_memory,
+                                        self._node_sensor.logged_in_users,
+                                        self._node_sensor.process_count,
+                                        self._node_sensor.running_process_count,
+                                        self.FAULT_RESOLVED,
+                                        fault_resolved_event
+                                        )
 
-        if self._node_sensor.total_memory["percent"] < self._host_memory_usage_threshold \
-           and self.high_usage['memory']:
-
-            fault_resolved_event = "Host memory usage decreased to %s, lesser than configured threshold of %s" \
-                                    %(self._node_sensor.total_memory["percent"],
-                                      self._host_memory_usage_threshold)
-            logger.warning(fault_resolved_event)
-            logged_in_users = []
-            # Create the host update message and hand it over to the egress processor to transmit
-            hostUpdateMsg = HostUpdateMsg(self._node_sensor.host_id,
-                                    self._epoch_time,
-                                    self._node_sensor.boot_time,
-                                    self._node_sensor.up_time,
-                                    self._node_sensor.uname, self._units,
-                                    self._node_sensor.total_memory,
-                                    self._node_sensor.logged_in_users,
-                                    self._node_sensor.process_count,
-                                    self._node_sensor.running_process_count,
-                                    self.FAULT_RESOLVED,
-                                    fault_resolved_event
-                                    )
-
-            # Add in uuid if it was present in the json request
-            if self._uuid is not None:
-                hostUpdateMsg.set_uuid(self._uuid)
-            jsonMsg = hostUpdateMsg.getJson()
-            # Transmit it to message processor
-            self.host_sensor_data = jsonMsg
-            self.os_sensor_type["memory_usage"] = self.host_sensor_data
-            self._write_internal_msgQ(EgressProcessor.name(), jsonMsg)
-            self.high_usage['memory'] = False
-            self.persist_state_data('memory', 'MEMORY_USAGE_DATA')
+                # Add in uuid if it was present in the json request
+                if self._uuid is not None:
+                    hostUpdateMsg.set_uuid(self._uuid)
+                jsonMsg = hostUpdateMsg.getJson()
+                # Transmit it to message processor
+                self.host_sensor_data = jsonMsg
+                self.os_sensor_type["memory_usage"] = self.host_sensor_data
+                self._write_internal_msgQ(EgressProcessor.name(), jsonMsg)
+                self.high_usage['memory'] = False
+                self.persist_state_data('memory', 'MEMORY_USAGE_DATA')
 
     def _generate_local_mount_data(self):
         """Create & transmit a local_mount_data message as defined

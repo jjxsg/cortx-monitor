@@ -100,6 +100,7 @@ LOGGINGMSGHANDLER:
 
 NODEDATAMSGHANDLER:
    transmit_interval: 10
+   transmit_duration_threshold: 30
    units: MB
    disk_usage_threshold: 80
    cpu_usage_threshold: 80
