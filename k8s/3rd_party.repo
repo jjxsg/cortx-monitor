@@ -1,0 +1,6 @@
+[3rd_party]
+name=added from: http://cortx-storage.colo.seagate.com/releases/cortx/github/main/centos-7.8.2003/last_successful_prod//3rd_party/
+baseurl=http://cortx-storage.colo.seagate.com/releases/cortx/github/main/centos-7.8.2003/1137/prod//3rd_party/
+enabled=1
+gpgcheck = 0
+keepcache = 0

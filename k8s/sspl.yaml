@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sspl
+  labels:
+    app: sspl
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sspl
+  template:
+    metadata:
+      labels:
+        app: sspl
+    spec:
+      hostNetwork: true
+      containers:
+      - name: sspl
+        image: sspl
+        imagePullPolicy: IfNotPresent
+        volumeMounts:
+          - mountPath: /var/run/dbus/system_bus_socket
+            name: dbus-socket
+          - mountPath: /sys/class/sas_phy
+            name: sas-phy
+          - mountPath: /sys/devices/system/cpu/online
+            name: cpu-online
+          - mountPath: /proc/meminfo
+            name: meminfo
+          - mountPath: /dev/sda1
+            name: sda1
+          - mountPath: /sys/block
+            name: sys-block
+      volumes:
+      - name: dbus-socket
+        hostPath:
+          path: /var/run/dbus/system_bus_socket
+          type: Socket
+      - name: sas-phy
+        hostPath:
+          path: /sys/class/sas_phy
+          type: Directory
+      - name: cpu-online
+        hostPath:
+          path: /sys/devices/system/cpu/online
+          type: File
+      - name: meminfo
+        hostPath:
+          path: /proc/meminfo
+          type: File
+      - name: sda1
+        hostPath:
+          path: /dev/sda1
+          type: BlockDevice
+      - name: sys-block
+        hostPath:
+          path: /sys/block
+          type: Directory
+
