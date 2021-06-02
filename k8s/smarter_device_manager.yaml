@@ -1,0 +1,44 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: smarter-device-management
+  namespace: default
+spec:
+  priorityClassName: "system-node-critical"
+  hostNetwork: true
+  dnsPolicy: ClusterFirstWithHostNet
+  hostname: smarter-device-management
+  nodeName: dell09-m01.colo.seagate.com
+  containers:
+  - name: smarter-device-manager
+    image: registry.gitlab.com/arm-research/smarter/smarter-device-manager:v1.20.7
+    imagePullPolicy: IfNotPresent
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+    resources:
+      limits:
+        cpu: 100m
+        memory: 10Mi
+      requests:
+        cpu: 10m
+        memory: 10Mi
+    volumeMounts:
+      - name: device-plugin
+        mountPath: /var/lib/kubelet/device-plugins
+      - name: dev-dir
+        mountPath: /dev
+      - name: sys-dir
+        mountPath: /sys
+  volumes:
+    - name: device-plugin
+      hostPath:
+        path: /var/lib/kubelet/device-plugins
+    - name: dev-dir
+      hostPath:
+            path: /dev
+    - name: sys-dir
+      hostPath:
+            path: /sys
+  terminationGracePeriodSeconds: 30
