@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sspl
+  labels:
+    app: sspl
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sspl
+  template:
+    metadata:
+      labels:
+        app: sspl
+    spec:
+      hostNetwork: true
+      containers:
+      - name: sspl
+        image: sspl
+        imagePullPolicy: IfNotPresent
+        volumeMounts:
+          - mountPath: /sys/fs/cgroup:ro 
+            name: cgroup
+          - mountPath: /run
+            name: var-run
+          - mountPath: /var/run/dbus/system_bus_socket
+            name: dbus-socket
+          - mountPath: /sys/class/sas_phy
+            name: sas-phy
+          - mountPath: /sys/devices/system/cpu/online
+            name: cpu-online
+          - mountPath: /proc/meminfo
+            name: meminfo
+          - mountPath: /sys/block
+            name: sys-block
+        volumeDevices:
+        - name: sda
+          devicePath: /dev/sda
+      volumes:
+      - name: cgroup
+        hostPath:
+          path: /sys/fs/cgroup
+          type: DirectoryOrCreate
+      - name: var-run
+        emptyDir:
+          medium: Memory
+      - name: dbus-socket
+        hostPath:
+          path: /var/run/dbus/system_bus_socket
+          type: Socket
+      - name: sas-phy
+        hostPath:
+          path: /sys/class/sas_phy
+          type: Directory
+      - name: cpu-online
+        hostPath:
+          path: /sys/devices/system/cpu/online
+          type: File
+      - name: meminfo
+        hostPath:
+          path: /proc/meminfo
+          type: File
+      - name: sys-block
+        hostPath:
+          path: /sys/block
+          type: Directory
+      - name: sda
+        persistentVolumeClaim:
+          claimName: sspl-pvc-sda
+
