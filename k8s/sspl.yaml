@@ -32,6 +32,12 @@ spec:
             name: sda1
           - mountPath: /sys/block
             name: sys-block
+        command:
+          - "/sbin/init"
+          - "-c"
+          - "--"
+        args:
+          - 'sleep infinity'
       volumes:
       - name: dbus-socket
         hostPath:
