@@ -33,11 +33,7 @@ spec:
           - mountPath: /sys/block
             name: sys-block
         command:
-          - "/sbin/init"
-          - "-c"
-          - "--"
-        args:
-          - 'sleep infinity'
+          - "/opt/seagate/cortx/sspl/low-level/sspl_ll_d"
       volumes:
       - name: dbus-socket
         hostPath:
